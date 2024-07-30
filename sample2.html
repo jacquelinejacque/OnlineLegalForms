@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <title>Pane Layout</title>
+    <style>
+        body {
+            display: flex;
+            height: 100vh;
+            margin: 0;
+        }
+
+        #pane1,
+        #pane2,
+        #pane3 {
+            flex: 1;
+            padding: 10px;
+            overflow: auto;
+        }
+
+        #pane1 {
+            background-color: lightblue;
+        }
+
+        #pane2 {
+            background-color: lightgreen;
+        }
+
+        #pane3 {
+            background-color: lightcoral;
+        }
+
+        .step {
+            padding: 10px;
+            margin-bottom: 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .form {
+            margin-top: 10px;
+        }
+
+        .field {
+            margin-bottom: 10px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+
+        .subField {
+            margin-left: 20px;
+            padding: 5px;
+            border-left: 1px solid #ddd;
+            cursor: grab;
+        }
+
+        .inputField {
+            margin-bottom: 10px;
+        }
+
+        #inputFieldsContainer {
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            margin-top: 20px;
+        }
+
+        #inputFieldsContainer input,
+        #inputFieldsContainer textarea {
+            display: block;
+            width: calc(100% - 20px);
+            margin: 10px 0;
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        #inputFieldsContainer input:focus,
+        #inputFieldsContainer textarea:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 5px rgba(52, 152, 219, 0.5);
+        }
+
+        .remove-button {
+            margin-left: 10px;
+            color: red;
+            cursor: pointer;
+        }
+
+        .bold-subfield {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="pane1">
+        <div id="dataDisplay"></div>
+    </div>
+    <div id="pane2">
+        <div id="inputFieldsContainer"></div>
+    </div>
+    <div id="pane3">
+        <div id="stepsContainer"></div>
+    </div>
+
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.3.6/purify.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const stepsContainer = document.getElementById('stepsContainer');
+            const inputFieldsContainer = document.getElementById('inputFieldsContainer');
+            const dataDisplay = document.getElementById('dataDisplay'); // pane 1
+            const saveButton = document.createElement('button');
+            saveButton.textContent = 'Save';
+            saveButton.classList.add('save-button');
+
+            // Function to create a single field element
+            function createFieldElement(field) {
+                const fieldElement = document.createElement('div');
+                fieldElement.classList.add('field');
+
+                const textElement = document.createElement('p');
+                textElement.textContent = field.text;
+                fieldElement.appendChild(textElement);
+
+                // Add Sortable capability to subfields
+                if (field.subFields && field.subFields.length > 0) {
+                    const subFieldsContainer = document.createElement('div');
+                    subFieldsContainer.classList.add('subFieldsContainer');
+
+                    field.subFields.forEach(subField => {
+                        const subFieldElement = document.createElement('div');
+                        subFieldElement.classList.add('subField');
+                        subFieldElement.textContent = subField.text;
+                        subFieldElement.style.fontWeight = 'bold'; // Bold the text of Subfield
+                        subFieldElement.setAttribute('draggable', true); // Make subfield draggable
+                        subFieldElement.setAttribute('data-type', subField.attributes.fieldType); // Add type attribute
+
+                        subFieldElement.addEventListener('dragstart', (event) => {
+                            event.dataTransfer.setData('text/plain', subField.text);
+                            event.dataTransfer.setData('type', subField.attributes.fieldType); // Set type data
+                        });
+
+                        subFieldsContainer.appendChild(subFieldElement);
+                    });
+
+                    // Make subfields container sortable
+                    new Sortable(subFieldsContainer, {
+                        group: 'subFields',
+                        animation: 150,
+                        draggable: '.subField',
+                        ghostClass: 'sortable-ghost',
+                        onEnd: evt => {
+                            // Handle dropping into input fields container
+                            const droppedText = evt.item.textContent.trim();
+                            const droppedType = evt.item.getAttribute('data-type'); // Get the type
+
+                            let inputFieldContainer = document.createElement('div');
+                            inputFieldContainer.classList.add('input-field-container');
+
+                            if (droppedType === 'richtext') {
+                                // Create Quill editor for richtext
+                                const quillEditor = document.createElement('div');
+                                quillEditor.classList.add('quill-editor');
+                                inputFieldContainer.appendChild(quillEditor);
+
+                                const quill = new Quill(quillEditor, {
+                                    theme: 'snow',
+                                    modules: {
+                                        toolbar: [
+                                            ['bold', 'italic', 'underline'],
+                                            ['clean']
+                                        ]
+                                    }
+                                });
+
+                                inputFieldContainer.quill = quill; // Store quill instance for later use
+                            } else {
+                                let inputField;
+                                switch (droppedType) {
+                                    case 'date':
+                                        inputField = document.createElement('input');
+                                        inputField.setAttribute('type', 'date');
+                                        break;
+                                    case 'textarea':
+                                        inputField = document.createElement('textarea');
+                                        inputField.setAttribute('placeholder', 'Enter value');
+                                        break;
+                                    default:
+                                        inputField = document.createElement('input');
+                                        inputField.setAttribute('type', 'text');
+                                        inputField.setAttribute('placeholder', 'Enter value');
+                                        break;
+                                }
+                                inputField.setAttribute('name', droppedText); // Set name attribute to identify input
+                                inputFieldContainer.appendChild(inputField);
+                            }
+
+                            // Add "X" button to remove dynamically created input field
+                            const removeInputButton = document.createElement('button');
+                            removeInputButton.textContent = 'X';
+                            removeInputButton.classList.add('remove-button');
+                            removeInputButton.addEventListener('click', () => {
+                                inputFieldContainer.remove(); // Remove the entire input field container
+                            });
+                            inputFieldContainer.appendChild(removeInputButton);
+
+                            inputFieldsContainer.appendChild(inputFieldContainer);
+
+                            // Reinitialize sortable for the newly added input fields
+                            initializePane2Sortable();
+                        }
+                    });
+
+                    fieldElement.appendChild(subFieldsContainer);
+                }
+
+                return fieldElement;
+            }
+
+            // Function to create a single step element
+            function createStepElement(step) {
+                const stepElement = document.createElement('div');
+                stepElement.classList.add('step');
+
+                const titleElement = document.createElement('h2');
+                titleElement.textContent = step.title;
+                stepElement.appendChild(titleElement);
+
+                const readMoreElement = document.createElement('button');
+                readMoreElement.textContent = 'Read More';
+                readMoreElement.addEventListener('click', () => {
+                    const formElement = document.createElement('div');
+                    formElement.classList.add('form');
+                    step.form.forEach(field => {
+                        const fieldElement = createFieldElement(field);
+                        formElement.appendChild(fieldElement);
+                    });
+                    stepElement.appendChild(formElement);
+                    readMoreElement.remove();
+                });
+
+                stepElement.appendChild(readMoreElement);
+
+                return stepElement;
+            }
+
+            // Function to initialize the steps container
+            function initializeStepsContainer() {
+                fieldsData.forEach(stepData => {
+                    const stepElement = createStepElement(stepData);
+                    stepsContainer.appendChild(stepElement);
+                });
+            }
+
+            // Initialize sortable functionality for pane 2
+            function initializePane2Sortable() {
+                new Sortable(inputFieldsContainer, {
+                    animation: 150,
+                    draggable: '.input-field-container',
+                    ghostClass: 'sortable-ghost',
+                });
+            }
+
+            // Initialize sortable functionality for pane 1
+            function initializePane1Sortable() {
+                new Sortable(dataDisplay, {
+                    animation: 150,
+                    draggable: 'p', // or another selector matching your items
+                    ghostClass: 'sortable-ghost',
+                });
+            }
+
+            // Save button click handler
+            saveButton.addEventListener('click', () => {
+                const formData = {};
+                const containers = inputFieldsContainer.querySelectorAll('.input-field-container');
+
+                containers.forEach(container => {
+                    let fieldName, fieldValue;
+                    const quillEditor = container.querySelector('.quill-editor');
+
+                    if (quillEditor) {
+                        const quill = Quill.find(quillEditor);
+                        fieldName = quill.container.previousSibling.textContent.trim();
+                        formData[`${fieldName}_html`] = quill.root.innerHTML; // Save HTML content only
+                    } else {
+                        const inputField = container.querySelector('input, textarea');
+                        fieldName = inputField.getAttribute('name');
+                        fieldValue = inputField.value;
+                        formData[fieldName] = fieldValue;
+                    }
+                });
+
+                // Clear previous content and add updated data
+                dataDisplay.innerHTML = '';
+                for (const key in formData) {
+                    if (formData.hasOwnProperty(key)) {
+                        const fieldDisplay = document.createElement('div');
+                        const p = document.createElement('p');
+                        p.innerHTML = DOMPurify.sanitize(formData[key]); // Sanitize and render HTML content
+                        fieldDisplay.appendChild(p);
+                        dataDisplay.appendChild(fieldDisplay);
+                    }
+                }
+
+                // Log the formData to the console
+                console.log(formData);
+
+                // Reinitialize sortable functionality for pane 1
+                initializePane1Sortable();
+            });
+
+            // Add save button to pane 2
+            const pane2 = document.getElementById('pane2');
+            pane2.insertBefore(saveButton, pane2.firstChild);
+
+            // Initialize the steps container and sortable functionalities
+            initializeStepsContainer();
+            initializePane2Sortable();
+            initializePane1Sortable();
+        });
+
+        // Mock data structure for fields
+                const fieldsData =[
+                    {
+                        "step": 1,
+                        "title": "VERIFIED BILL OF PARTICULARS",
+                        "id": "step1",
+                        "optional": false,
+                        "divSize": 4,
+                        "form": [
+                            {
+                                "id": 1,
+                                "text": "The address and resident of the plaintiff pursuant to section 3118 of the Civil Practice Law and rules",
+                                "subFields": [
+                                    {
+                                        "name": "county",
+                                        "divSize": 4,
+                                        "text": "County",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": true,
+                                            "textCapitalization": true,
+                                            "fieldType": "free_text",
+                                            "placeholder": "WESTCHESTER"
+                                        }
+                                    },
+                                    {
+                                        "name": "index_no",
+                                        "text": "Index Number",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "placeholder": "63749/2023"
+                                        }
+                                    },
+                                    {
+                                        "name": "party_name",
+                                        "text": "Party name",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": true,
+                                            "textCapitalization": true,
+                                            "fieldType": "free_text",
+                                            "placeholder": "EMYLI DOMINGUEZ"
+                                        }
+                                    },
+                                    {
+                                        "name": "plaintiff_address",
+                                        "text": "Plaintiff(s)", 
+                                        "info": "Plaintiff(s)",
+                                        "tooltipImage":"images/bill_of_particulars/1a.png", 
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": true,
+                                            "textCapitalization": true,
+                                            "fieldType": "richtext",
+                                            "rows": 3,
+                                            "placeholder": "<p>LEO CHA, WAN ZHONG, CURTIS HARLAN,</p><p> UBER TECHNOLOGIES, INC. and </p><p> UBER USA, LLC,</p>"
+                                        }
+                                    },
+                                    {
+                                        "name": "defendants",
+                                        "text": "Defendants",
+                                        "info": "Defendants",
+                                        "tooltipImage":"images/bill_of_particulars/1b.png", 
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": true,
+                                            "textCapitalization": true,
+                                            "fieldType": "free_text",
+                                            "placeholder": "LEO CHA and WAN ZHONG"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 2,
+                                "text": "The date and approximate time of day of the occurrence",
+                                "subFields": [
+                                    {
+                                        "name": "occurence_date",
+                                        "text": "Date of Occurence",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": true,
+                                            "textCapitalization": false,
+                                            "fieldType": "date",
+                                            "format": "F d,Y",
+                                            "enableTime": false,
+                                            "placeholder": "2023-04-03"
+                                        }
+                                    },
+                                    {
+                                        "name": "occurence_time",
+                                        "text": "Time of Occurence",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": true,
+                                            "textCapitalization": false,
+                                            "fieldType": "date",
+                                            "format": "H:i K",
+                                            "enableTime": true,
+                                            "placeholder": "11:04 am"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 3,
+                                "text": "The approximate location of the occurrence in sufficient detail so as to permit accurate identification",
+                                "info": "The approximate location of the occurrence in sufficient detail so as to permit accurate identification",
+                                "tooltipImage":"images/bill_of_particulars/1.png", 
+                                "subFields": [
+                                    {
+                                        "name": "occurrence_location",
+                                        "text": "Location of the occurance",
+                                        "divSize": 8,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "At or near the intersection Maple Avenue and Davis Avenue, City of White Plains, County of Westchester and State of New York"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 4,
+                                "text": "Set forth by chapter, article,section and paragraph each and every statute or ordinance if any, which it is claimed the defendant violated",
+                                "description": "", 
+                                "info":"Statute Violations",
+                                "tooltipImage":"images/bill_of_particulars/2.png", 
+                                "subFields": [
+                                    {
+                                        "name": "statute_violations",
+                                        "text": "Statute Violations",
+                                        "divSize": 8,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "The defendants violated §§1110, 1111, 1140, 1142, 1180, 1180-a and 1212 and Articles 23, 24, 25, 26, 28, 30, 31, 32, and 33"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "step": 2,
+                        "title": "VERIFIED BILL OF PARTICULARS",
+                        "id": "step2",
+                        "optional": false,
+                        "divSize": 6,
+                        "form": [
+                            {
+                                "id": 5,
+                                "info":"General Statement",
+                                "tooltipImage":"images/bill_of_particulars/3.png", 
+                                "text": " A general statement of the acts or ommissions constituting the negligence claim",
+                                "subFields": [
+                                    {
+                                        "name": "negligence",
+                                        "divSize": 8,
+                                        "text": "General statement of the acts or omissions constituting the negligence claimed",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "richtext",
+                                            "rows": 10,
+                                            "placeholder": "That all of the foregoing occurred solely as a result of the carelessness, recklessness, culpable conduct and negligence of the defendants in the ownership, operation, management, maintenance and control of the aforesaid motor vehicle; in that the said vehicle was operated at a high, excessive, illegal and dangerous rate of speed; in that the defendants failed to take cognizance of plaintiff who was lawfully upon the aforesaid highway and/or thoroughfare; in failing to apply the brakes in time to avoid forcibly striking another motor vehicle; in failing to stop; in causing the aforementioned motor vehicle to actually come into violent and physical contact with another motor vehicle; in placing said plaintiff in a dangerous and perilous condition while lawfully on the aforesaid public highway and/or thoroughfare; in failing to yield to traffic; in failing to observe what was there to be seen; in failing to keep a lookout; in endangering the life and limb of all motorists traversing thereon and thereat, and more particularly said plaintiff; in failing to observe the rules of the road; in failing to have said motor vehicle in proper condition; in driving carelessly; in maintaining, controlling and operating the said motor vehicle in such a careless manner as to strike another motor vehicle, thereby causing said plaintiff to sustain severe injuries and in that defendants violated the regulations, ordinances and statutes of the State of New York; and in other ways acted in a careless, reckless and negligent manner."
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 6,
+                                "info":"A statement of Injuries",
+                                "tooltipImage":"images/bill_of_particulars/4.png", 
+                                "text": " A statement of the injuries and a description of those claimed to be permanent",
+                                "subFields": [
+                                    {
+                                        "name": "description_of_injuries",
+                                        "divSize": 8,
+                                        "text": "Statement of the injuries and description of those claimed to be permanent",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": true,
+                                            "fieldType": "richtext",
+                                            "rows": 10,
+                                            "placeholder": "<p>CERVICAL SPINE:</p><p> ACUTE NONDISPLACED FRACTURE OF THE RIGHT C6 LAMINA EXTENDING TO THE RIGHT FACET C6 INFERIOR ARTICULAR PROCESS, RIGHT C7 FACET SUPERIOR ARTICULAR PROCESS AND RIGHT C7 TRANSVERSE PROCESS. SMALL AMOUNT OF REGIONAL BONE MARROW EDEMA;</p><p>  NONDISPLACED FRACTURE OF THE RIGHT C6 LAMINA AS WELL AS THE RIGHT C7 TRANSVERSE PROCESS. THE FRACTURE EXTENDS ALONG THE INFERIOR ARTICULAR PROCESS OF C6 AND SUPERIOR ARTICULAR PROCESS OF C7 INVOLVING THE RIGHT C6-C7 FACET. THE FRACTURE THEN EXTENDS INTO THE RIGHT C7 TRANSVERSE PROCESS; RIGHT C5-C6, C6-C7, AND C7-T1 FACET EDEMA SUGGESTIVE OF CAPSULAR INJURY. THIN PREVERTEBRAL HEMATOMA CENTERED AT C6-C7 MEASURING UP TO 2 MM IN THICKNESS; </p><p> SUGGESTION OF FOCAL DISCONTINUITY OF THE ANTERIOR LONGITUDINAL LIGAMENT AT C6-C7 SUGGESTIVE OF LIGAMENTOUS INJURY. MILD INTERSPINOUS LIGAMENTS EDEMA AT C5-C6 AND C6-C7 SUGGESTIVE OF LIGAMENTOUS INJURY; C6/7 LEVEL DISC BULGE; CERVICAL RADICULOPATHY; </p><p> AS A RESULT OF THE FRACTURES ARTHRITIS WILL DEVELOP IN THE FUTURE OPERATIVE PROCEDURE ON 08/26/23: C6/C7 ANTERIOR CERVICAL DISCECTOMY AND FUSION; PERMANENT SURGICAL SCARRING RIGHT SHOULDER: EFFUSION AT THE GLENOHUMERAL JOINT; </p><p> TENDINOPATHY OF THE INFRASPINATUS TENDON; INTERNAL DERANGEMENT THORACIC SPINE: THORACIC SPRAIN; THORACIC STRAIN LUMBAR SPINE: LUMBAR MYOFASCITIS; LUMBAR RADICULITIS; STRAIGHTENING OF THE EXPECTED LUMBAR LORDOSIS.</p>"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "step": 3,
+                        "divSize": 4,
+                        "title": "VERIFIED BILL OF PARTICULARS",
+                        "id": "step3",
+                        "optional": false,
+                        "form": [
+                            {
+                                "id": 7,
+                                "text": "The length of time confined to bed and house with dates of confinement.",
+                                "subFields": [
+                                    {
+                                        "name": "length_of_time_confined_to_bed",
+                                        "info": "a few months",
+                                        "tooltipImage":"images/bill_of_particulars/7.png",
+                                        "divSize": 4,
+                                        "text": "Length of time confined to bed ",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "placeholder": "a few months"
+                                        }
+                                    },
+                                    {
+                                        "name": "length_of_time_confined_to_house",
+                                        "info": "since the date of the accident",
+                                        "tooltipImage":"images/bill_of_particulars/7.png",
+                                        "divSize": 4,
+                                        "text": "Length of time confined to house",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "placeholder": "since the date of the accident"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 8,
+                                "text": "Name of that hospital and dates of admission and discharge.",                        
+                                "subFields": [
+                                    {
+                                        "name": "treatment_facility",
+                                        "divSize": 6,
+                                        "addButtonEnabled":false,
+                                        "btnText":"Click to add new hospital and dates of admission and discharge",
+                                        "tooltipImage":"images/bill_of_particulars/8.png",
+                                        "info": "at Westchester Medical Center, 100 Woods Road, Valhalla, NY 10595 and underwent surgery on 8/26/23",
+                                        "text": "Name of that hospital and dates of admission and discharge.",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "richtext",
+                                            "placeholder": "at Westchester Medical Center, 100 Woods Road, Valhalla, NY 10595 and underwent surgery on 8/26/23"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 9,
+                                "text": "Total amounts claimed as special damages for:",
+                                "subFields": [
+                                    {
+                                        "name": "medical_expenses",
+                                        "text": "Medical expenses",
+                                        "addButtonEnabled":true,
+                                        "btnText":"Click to add new medical expense", 
+                                        "tooltipImage":"images/bill_of_particulars/9.png",
+                                        "info": "Medical expenses",
+                                        "divSize": 8,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "rows":4,
+                                            "placeholder": " <p> $125,000.00: Westchester Medical Center, 100 Woods Road, Valhalla, NY 10595</p><p> $2,500.00: Richard Badke, M.D./CitiMed Complete Medical Care,  14 Mamaroneck Ave 2nd fl, White Plains, NY,  10601</p><p>   $3,000.00: Citimed Diagnostic,\\n  92-20 165th Street, Jamaica, NY 11433</p>"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "step": 4,
+                        "title": "VERIFIED BILL OF PARTICULARS",
+                        "id": "step4",
+                        "optional": false,
+                        "divSize": 4,
+                        "form": [
+                            {
+                                "id": 10,
+                                "addButtonEnabled":false,
+                                "info":"Employer Details",
+                                "tooltipImage":"images/bill_of_particulars/10.png", 
+                                "btnText":"Click to add new hospital and dates of admission and discharge", 
+                                "text": "The name(s) and address(es) of plaintiff employer(s) at the time of the accident and length of time incapacitated from such employment",
+                                "subFields": [
+                                    {
+                                        "name": "employer",
+                                        "text": "Employer Details",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "richtext",
+                                            "placeholder": "Opus Westchester Autograph Collection, 3 Renaissance Square, White Plains, NY 10601"
+                                        }
+                                    }, 
+                                    {
+                                        "name": "length_of_time_incapacitated",
+                                        "text": "Length of time incapacitated from employment",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "richtext",
+                                            "placeholder": "Plaintiff has not returned to work since the date of the accident"
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 11,
+                                "info":"Occupation & Salary",
+                                "tooltipImage":"images/bill_of_particulars/11.png", 
+                                "text": "The occupation of plaintiff at the time of the alleged accident and average daily, weekly or monthly earnings",
+                                "subFields": [
+                                    {
+                                        "name": "occupation",
+                                        "text": "Occupation",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "placeholder":"Line Cook"
+                                        }
+                                    },
+                                    {
+                                        "name": "salary",
+                                        "text": "Salary",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "richtext",
+                                            "rows": 3,
+                                            "placeholder":"<p> a. Approximately $840.00 per week</p><p> b. Approximately $360.00 per week</p>"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "step": 5,
+                        "title": "VERIFIED BILL OF PARTICULARS",
+                        "id": "step5",                
+                        "optional": false,
+                        "divSize": 4,
+                        "form": [
+                            {
+                                "name": "10. ",
+                                "id": 12,
+                                "info":"Lost earnings",
+                                "tooltipImage":"images/bill_of_particulars/12.png", 
+                                "text": "Lost earnings",
+                                "description": "Click add button to add new item",
+                                "divSize": 4,
+                                "subFields": [
+                                    {
+                                        "name": "lost_earnings",
+                                        "addButtonEnabled":true,
+                                        "btnText":"Click to add new loss of earning or wages field",
+                                        "text": "Loss of earning and wages",
+                                        "divSize": 8,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "row": 1,
+                                            "placeholder": " Approximately $12,000.00 and continuing calculated at $1,200.00 per week x 10 weeks out of work. Future lost earnings are anticipated due to the diminution of earnings capacity suffered by the plaintiff as a consequence of injuries sustained in the subject occurrence."
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 13,
+                                "text": "The plaintiffs date of birth and social security number",
+                                "subFields": [
+                                    {
+                                        "name": "plaintiff_dob",
+                                        "text": "Plaintiff DOB",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "date",
+                                            "format": "m/d/Y",
+                                            "enableTime": false,
+                                            "placeholder": "2001-0-01"
+                                        }
+                                    },
+                                    {
+                                        "name": "social_security_number",
+                                        "text": "Social Security Number (if required)",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "placeholder": ""
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 14,
+                                "text": "A supplemental bill of particulars with respect to claims of continuing special damages and disabilities without leave of court at any time, but not less than thirty days prior to trial.",
+                                "description": "",
+                                "subFields": [
+                                    {
+                                        "name": "loss_of_services",
+                                        "text": "Loss of services", 
+                                        "addButtonEnabled":true,
+                                        "btnText":"Click to add other bill of particulars", 
+                                        "divSize": 8,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "rows": 3,
+                                            "placeholder": "No other items of damages are known at this time."
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "step": 6,
+                        "title": "DISCOVERY RESPONSES",
+                        "id": "step6",
+                        "optional": false,
+                        "divSize": 4,
+                        "form": [
+                            {
+                                "name": "",
+                                "id": 1,
+                                "info":"Witness Details",
+                                "tooltipImage":"images/bill_of_particulars/w1.png", 
+                                "text": "Witness Details",
+                                "subFields": [
+                                    {
+                                        "name": "witnesses",
+                                        "position": "1",
+                                        "text": "1. Witnesses",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "No witnesses are known at this time other than those listed on the police report including Wan Zhong and Adriana Cha"
+                                        }
+                                    },
+                                    {
+                                        "name": "written_statements",
+                                        "position": "2",
+                                        "divSize": 4,
+                                        "text": "2. Written statements",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "he plaintiff is not in possession of any written statements made by the defendants."
+                                        }
+                                    },
+                                    {
+                                        "name": "expert_witnesses",
+                                        "position": "3",
+                                        "divSize": 4,
+                                        "text": "3. Expert Witnesses",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "No experts have been retained at this time."
+                                        }
+                                    },
+                                    {
+                                        "name": "authorizations",
+                                        "position": "4",
+                                        "divSize": 4,
+                                        "text": "4. Authorizations",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "richtext",
+                                            "rows": 6,
+                                            "placeholder": "The following authorizations are annexed hereto: Westchester Medical Center, 100 Woods Road, Valhalla, NY 10595 Richard Badke, M.D./CitiMed Complete Medical Care,14 Mamaroneck Ave 2nd fl, White plains, NY,10601 Citimed Diagnostic, 92-20 165th Street, Jamaica, NY 11433 Liberty Mutual Insurance, P.O. Box 7214, London, KY 40742, no-fault file #AB949-510703 Opus Westchester Autograph Collection,3 Renaissance Square, White Plains, NY 10601 (employment) Red Horse by David Burke, 221 Main Street, White Plains, NY 10601(employment)"
+                                        }
+                                    },
+                                    {
+                                        "name": "photographs",
+                                        "position": "5",
+                                        "divSize": 4,
+                                        "text": "5. Photographs",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "Photographs are annexed hereto. "
+                                        }
+                                    },
+                                    {
+                                        "name": "demand_relief",
+                                        "position": "6",
+                                        "divSize": 4,
+                                        "text": "6. CPLR 3017(c) demand for relief",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "textarea",
+                                            "rows": 3,
+                                            "placeholder": "$4,000,000.00 "
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "step": 10,
+                        "title": "DISCOVERY DEMANDS",
+                        "id": "step10",
+                        "optional": false,
+                        "divSize": 4,
+                        "form": [
+                            {
+                                "id": 1,
+                                "text": "Deposition upon oral examination",
+                                "subFields": [
+                                    {
+                                        "name": "deposition_date",
+                                        "divSize": 4,
+                                        "info":"Disposition Date",
+                                        "tooltipImage":"images/bill_of_particulars/d3.png", 
+                                        "text": "Deposition Date and Time",
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": false,
+                                            "fieldType": "free_text",
+                                            "placeholder": "the 27th day of October, 2023 at 10:00 oclock in the forenoon "
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                "id": 2,
+                                "text": "Address of Attorneys for Defendants ",
+                                "info":"Attorneys for Defendants address",
+                                "tooltipImage":"images/bill_of_particulars/d2.png", 
+                                "subFields": [
+                                    {
+                                        "name": "addressed_name",
+                                        "text": "Address of Attorneys for Defendants",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": true,
+                                            "isRequired": false,
+                                            "textCapitalization": true,
+                                            "fieldType": "richtext",
+                                            "placeholder": "LAW OFFICE OF BRYAN M. KULAK"
+                                        }
+                                    },
+                                    {
+                                        "name": "addressed_address",
+                                        "text": "Address of Attorney",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": false,
+                                            "isRequired": false,
+                                            "textCapitalization": true,
+                                            "fieldType": "free_text",
+                                            "placeholder": "90 Crystal Run Road Suite 409"
+                                        }
+                                    },
+                                    {
+                                        "name": "addressed_city",
+                                        "text": "City/Town",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": false,
+                                            "isRequired": false,
+                                            "textCapitalization": true,
+                                            "fieldType": "free_text",
+                                            "placeholder": "Middletown, NY 10941"
+                                        }
+                                    },
+                                    {
+                                        "name": "addressed_tel",
+                                        "text": "Tel/Phone Number",
+                                        "divSize": 4,
+                                        "attributes": {
+                                            "isShown": false,
+                                            "isRequired": false,
+                                            "textCapitalization": true,
+                                            "fieldType": "free_text",
+                                            "placeholder": "(845) 673-8080"
+                                        }
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+            ];     
+                   
+    </script>
+</body>
+</html>
